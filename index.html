@@ -129,15 +129,16 @@ a{color:var(--focus)}
 
 <header class="mast">
   <p class="eyebrow">Jerry / Phase 0 / Simulation</p>
-  <h1>Prediction only helps a predator that can turn.</h1>
+  <h1>The mouse isn't evading. It's running a lap.</h1>
   <p class="standfirst">
-    Three days of parameter sweeps on a 2D pursuit simulation. The cat's look-ahead
-    distance has no good value on its own — every apparent optimum moves when you
-    change how fast the cat can steer. 18,000 episodes.
+    Four days of parameter sweeps on a 2D pursuit simulation. The hand-written
+    evasion policy survives most cats — but only because it settles into a fixed
+    perimeter loop. Two specific cat configurations intercept that loop and catch
+    it every single time. 32,000 episodes.
   </p>
   <div class="meta">
     <span><b>Policy</b> hand-written wall-slide</span>
-    <span><b>Episodes</b> 500 per cell</span>
+    <span><b>Grid</b> 8 &times; 8, N=200</span>
     <span><b>Mouse</b> 3.0 m/s</span>
     <span><b>Cat</b> 2.0 m/s</span>
     <span><b>Cap</b> 100 s</span>
@@ -178,10 +179,44 @@ a{color:var(--focus)}
   <p class="sub">
     The three lines above are slices through this grid. Read across a row and the
     cat has an optimum; read down a column and that optimum moves. There is no
-    best LEAD, only a best pairing.
+    best LEAD, only a best pairing — and two cells where the mouse never escapes.
   </p>
   <div class="panel">
     <div class="hm" id="heatmap"></div>
+  </div>
+</section>
+
+<section>
+  <h2>Two ways to always win</h2>
+  <p class="sub">
+    Both marked cells catch the mouse in essentially every episode, from opposite
+    corners of the grid. Watching them shows two unrelated mechanisms.
+  </p>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3>Lead 5.0 &middot; Turn 0.50 &mdash; herding</h3>
+      <p class="cap">500/500, 500/500, 500/500 across three independent runs.</p>
+      <p style="font-size:15px;color:var(--ink-soft);margin:0">
+        The aim point sits so far ahead that the cat stops following the mouse and
+        starts occupying the space it is sliding into. The policy has no answer:
+        it knows only <em>away from cat</em> and <em>along wall</em>, and has no
+        representation of where it will be trapped two seconds from now. Its
+        neighbours score 52% and 40% — nothing adjacent predicts this cell.
+      </p>
+    </div>
+    <div class="panel">
+      <h3>Lead 2.0 &middot; Turn 0.20 &mdash; chatter</h3>
+      <p class="cap">99% caught. Looks like the mouse stalls, but it cannot.</p>
+      <p style="font-size:15px;color:var(--ink-soft);margin:0">
+        <code style="font-family:'JetBrains Mono',monospace;font-size:13px">mouse_vel</code>
+        is normalised every step, so speed is constant by construction. The trace
+        shows the mouse pinned at x=10, flipping direction every frame between
+        y=1.86 and y=2.10 — full speed, reversing. The wall threshold sits at
+        exactly 2.0, so the bottom wall flickers in and out of the calculation and
+        rotates the slide direction back and forth.
+      </p>
+    </div>
   </div>
 </section>
 
@@ -237,7 +272,23 @@ a{color:var(--focus)}
   </div>
 
   <div class="finding">
-    <span class="tag">Finding 04 &mdash; policy design</span>
+    <span class="tag">Finding 04 &mdash; the policy itself</span>
+    <h3>The mouse settles into a perimeter loop.</h3>
+    <p>
+      A step-by-step trace of position and heading shows the mouse tracing the same
+      circuit repeatedly: up the right wall, across the top, down the left, along
+      the bottom, and round again. It is not evading — it is orbiting.
+    </p>
+    <p class="hit">
+      That explains the whole grid. The policy survives most cats because the loop
+      outruns them, and loses totally to the two that happen to intercept it. A
+      hand-written rule set has no reason to vary its behaviour, so it converges on
+      one trajectory and any predator matched to that trajectory wins every time.
+    </p>
+  </div>
+
+  <div class="finding">
+    <span class="tag">Finding 05 &mdash; policy design</span>
     <h3>Greedy rules cannot escape a corner.</h3>
     <p>
       A mouse that always moves directly away from the cat pins itself at (10,&nbsp;10)
@@ -290,12 +341,20 @@ a{color:var(--focus)}
         <span class="code">cat_vel += (desired − cat_vel) · TURN_RATE</span>
       </div>
     </div>
+    <div class="entry">
+      <div class="day"><b>Day 5</b>16 Aug</div>
+      <div>
+        <h3>Full grid and a trace</h3>
+        <p>Both parameters passed as arguments so the constant can be deleted — a stale reference now crashes instead of silently running the wrong value. 8&times;8 grid, then a per-step print of position and heading to diagnose the two perfect cells.</p>
+        <span class="code">print(np.round(mouse, 2), np.round(mouse_vel, 2))</span>
+      </div>
+    </div>
   </div>
 </section>
 
 <footer>
   Jerry — robot mouse, Phase 0. Simulation only; no cat has met this policy yet.<br>
-  Next: 2D sweep at finer resolution, then a fatigue term on the mouse.
+  Open: the wall threshold needs hysteresis, and the policy needs a reason not to orbit.
 </footer>
 
 </div>
@@ -371,30 +430,47 @@ function lineChart(key, max, unit, band){
 document.getElementById("chart-catch").innerHTML = lineChart("caught",100,"%",false);
 document.getElementById("chart-surv").innerHTML  = lineChart("mean",100,"s",true);
 
-// ---------- heatmap ----------
+// ---------- heatmap: full 8x8 grid, N=200 ----------
+const GLEADS = [0.5,1.0,1.5,2.0,2.5,3.0,3.5,5.0];
+const GTURNS = [0.05,0.1,0.15,0.2,0.3,0.5,0.7,1.0];
+const GRID = [
+  [12,14,22,25,17,14,11, 2],
+  [22,16,52,20, 8, 6, 6, 5],
+  [20,14,46,30, 8, 4, 6, 2],
+  [20,10,69,99,29, 5, 4, 5],
+  [26,25,24,53,52,20,14,52],
+  [24,16,22,24,76,68,48,100],
+  [20,22,30,24,66,78,46,40],
+  [20,24,65,88,39,26,25,90]
+];
+
 function shade(pct){
   // 0% -> teal (mouse escapes), 100% -> burnt orange (cat wins)
   const t = pct/100;
   const a=[15,118,110], b=[194,65,12];
   const c = a.map((v,i)=>Math.round(v+(b[i]-v)*t));
-  const bg = `rgb(${c[0]},${c[1]},${c[2]})`;
   const lum = (c[0]*0.299+c[1]*0.587+c[2]*0.114);
-  return {bg, fg: lum>150 ? "#141a24" : "#f6f5f1"};
+  return {bg:`rgb(${c[0]},${c[1]},${c[2]})`, fg: lum>150 ? "#141a24" : "#f6f5f1"};
 }
+
 let h = `<table class="hm-t"><thead><tr><th class="corner">TURN &#9660;<br>LEAD &#9654;</th>`;
-LEADS.forEach(l=> h += `<th>${l}</th>`);
+GLEADS.forEach(l=> h += `<th>${l}</th>`);
 h += `</tr></thead><tbody>`;
-SERIES.forEach(se=>{
-  h += `<tr><th class="rowh">${se.name}</th>`;
-  se.caught.forEach((c,i)=>{
-    const pct = c/N*100, col = shade(pct);
-    h += `<td style="background:${col.bg};color:${col.fg}" title="LEAD ${LEADS[i]} · TURN ${se.name} · ${c}/${N} caught">${Math.round(pct)}%</td>`;
+GTURNS.forEach((turn,r)=>{
+  h += `<tr><th class="rowh">${turn}</th>`;
+  GRID[r].forEach((pct,c)=>{
+    const col = shade(pct);
+    const perfect = pct >= 99;
+    const ring = perfect ? "box-shadow:inset 0 0 0 2px #141a24;font-weight:700" : "";
+    h += `<td style="background:${col.bg};color:${col.fg};${ring}" title="LEAD ${GLEADS[c]} · TURN ${turn} · ${pct}% caught">${pct}%</td>`;
   });
   h += `</tr>`;
 });
 h += `</tbody></table>
 <p style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#4a5568;margin:14px 0 0">
-Catch rate per 500 episodes. Teal = mouse escapes · orange = cat wins.</p>`;
+Catch rate per 200 episodes. Teal = mouse escapes · orange = cat wins.<br>
+Outlined cells catch the mouse in essentially every episode. The one at
+LEAD&nbsp;5.0 / TURN&nbsp;0.5 held at 500/500 across three runs of 500.</p>`;
 document.getElementById("heatmap").innerHTML = h;
 </script>
 </body>
